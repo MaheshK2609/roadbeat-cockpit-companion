@@ -289,7 +289,7 @@ export function Dashboard() {
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-muted-foreground"><span>Diagnostics</span><span>{active.length} active</span></div>
-            <ul className="mt-2 flex-1 space-y-1.5 overflow-hidden">
+            <ul className="mt-2 flex-1 space-y-1.5 overflow-y-auto">
               {ALERTS.map((a) => {
                 const done = acked.includes(a.id);
                 return (
