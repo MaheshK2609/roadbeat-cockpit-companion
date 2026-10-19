@@ -7,8 +7,8 @@ export interface SensorReading {
   coolant_sensor_valid: boolean;
   oil_pressure_sensor_valid: boolean;
   speed_kmh: number | null;
-  timestamp?: string;
-  sequence?: number;
+  timestamp?: string | undefined;
+  sequence?: number | undefined;
 }
 export const EMPTY_READING: SensorReading = {
   coolant_temperature_c: null, oil_pressure: null, oil_pressure_unit: "",
@@ -19,20 +19,20 @@ export function parseSensorMessage(raw: string): SensorReading {
   if (!d || typeof d !== "object") throw new Error("Expected a JSON object");
   const p = d as Record<string, unknown>;
   const numeric = (key: string) => typeof p[key] === "number" && Number.isFinite(p[key]);
-  if (typeof p.coolant_sensor_valid !== "boolean" || typeof p.oil_pressure_sensor_valid !== "boolean") throw new Error("Missing sensor validity flags");
-  if (typeof p.oil_pressure_unit !== "string" || (p.oil_pressure_sensor_valid && !p.oil_pressure_unit.trim())) throw new Error("Oil pressure unit required");
-  if (p.coolant_sensor_valid && !numeric("coolant_temperature_c")) throw new Error("Invalid coolant reading");
-  if (p.oil_pressure_sensor_valid && !numeric("oil_pressure")) throw new Error("Invalid oil reading");
-  if (p.speed_kmh != null && (!numeric("speed_kmh") || Number(p.speed_kmh) < 0)) throw new Error("Invalid speed");
-  const sequence = numeric("sequence") && Number.isInteger(p.sequence) && Number(p.sequence) >= 0 ? Number(p.sequence) : undefined;
-  const timestamp = typeof p.timestamp === "string" && Number.isFinite(Date.parse(p.timestamp)) ? p.timestamp : undefined;
+  if (typeof p["coolant_sensor_valid"] !== "boolean" || typeof p["oil_pressure_sensor_valid"] !== "boolean") throw new Error("Missing sensor validity flags");
+  if (typeof p["oil_pressure_unit"] !== "string" || (p["oil_pressure_sensor_valid"] && !p["oil_pressure_unit"].trim())) throw new Error("Oil pressure unit required");
+  if (p["coolant_sensor_valid"] && !numeric("coolant_temperature_c")) throw new Error("Invalid coolant reading");
+  if (p["oil_pressure_sensor_valid"] && !numeric("oil_pressure")) throw new Error("Invalid oil reading");
+  if (p["speed_kmh"] != null && (!numeric("speed_kmh") || Number(p["speed_kmh"]) < 0)) throw new Error("Invalid speed");
+  const sequence = numeric("sequence") && Number.isInteger(p["sequence"]) && Number(p["sequence"]) >= 0 ? Number(p["sequence"]) : undefined;
+  const timestamp = typeof p["timestamp"] === "string" && Number.isFinite(Date.parse(p["timestamp"])) ? p["timestamp"] : undefined;
   if (sequence === undefined && timestamp === undefined) throw new Error("Timestamp or sequence required");
   return {
-    coolant_temperature_c: p.coolant_sensor_valid ? Number(p.coolant_temperature_c) : null,
-    oil_pressure: p.oil_pressure_sensor_valid ? Number(p.oil_pressure) : null,
-    oil_pressure_unit: p.oil_pressure_unit.trim(), coolant_sensor_valid: p.coolant_sensor_valid,
-    oil_pressure_sensor_valid: p.oil_pressure_sensor_valid,
-    speed_kmh: p.speed_kmh == null ? null : Number(p.speed_kmh), sequence, timestamp,
+    coolant_temperature_c: p["coolant_sensor_valid"] ? Number(p["coolant_temperature_c"]) : null,
+    oil_pressure: p["oil_pressure_sensor_valid"] ? Number(p["oil_pressure"]) : null,
+    oil_pressure_unit: p["oil_pressure_unit"].trim(), coolant_sensor_valid: p["coolant_sensor_valid"],
+    oil_pressure_sensor_valid: p["oil_pressure_sensor_valid"],
+    speed_kmh: p["speed_kmh"] == null ? null : Number(p["speed_kmh"]), sequence, timestamp,
   };
 }
 export function roadRate(speed: number | null) {

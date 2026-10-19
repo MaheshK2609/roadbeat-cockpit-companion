@@ -1,0 +1,10 @@
+{
+  "pc_tcp_bind": "0.0.0.0",
+  "tcp_port": 9000,
+  "stm32_ip": "",
+  "websocket_bind": "127.0.0.1",
+  "websocket_port": 8765,
+  "allowed_origins": ["http://localhost:8080"],
+  "gateway_timeout_seconds": 5,
+  "max_message_bytes": 16384
+}
