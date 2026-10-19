@@ -7,11 +7,11 @@ const SHIFT_UP = [0, 20, 40, 60, 85, 115, 999];
 
 export function gearFor(speed: number) {
   let g = 1;
-  while (g < 6 && speed > SHIFT_UP[g]) g++;
+  while (g < 6 && speed > SHIFT_UP[g]!) g++;
   return g;
 }
 export function rpmFor(speed: number, gear: number) {
-  return Math.min(8, 0.8 + (speed * RATIOS[gear]) / 28);
+  return Math.min(8, 0.8 + (speed * RATIOS[gear]!) / 28);
 }
 
 export function useVehicle() {

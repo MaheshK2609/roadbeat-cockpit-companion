@@ -63,7 +63,7 @@ export function Dashboard() {
   useEffect(() => {
     if (!playing) return;
     const i = setInterval(() => setPos((p) => {
-      if (p + 1 >= TRACKS[track].dur) { setTrack((t) => (t + 1) % TRACKS.length); return 0; }
+      if (p + 1 >= TRACKS[track]!.dur) { setTrack((t) => (t + 1) % TRACKS.length); return 0; }
       return p + 1;
     }), 1000);
     return () => clearInterval(i);
@@ -82,7 +82,7 @@ export function Dashboard() {
   }, [v.setThrottle]);
 
   const active = ALERTS.filter((a) => !acked.includes(a.id));
-  const t = TRACKS[track];
+  const t = TRACKS[track]!;
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
   const time = now ? now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "--:--";
   const eta = Math.max(1, Math.round((v.trip / Math.max(v.speed, 20)) * 60));
@@ -109,8 +109,8 @@ export function Dashboard() {
 
           {/* warning icon arcs */}
           {[
-            { I: AlertTriangle, x: 90, y: 150, a: ALERTS[0] }, { I: Droplet, x: 150, y: 95, a: ALERTS[1] },
-            { I: Wrench, x: 225, y: 55, a: ALERTS[2] }, { I: BatteryCharging, x: 310, y: 30, a: ALERTS[3] },
+            { I: AlertTriangle, x: 90, y: 150, a: ALERTS[0]! }, { I: Droplet, x: 150, y: 95, a: ALERTS[1]! },
+            { I: Wrench, x: 225, y: 55, a: ALERTS[2]! }, { I: BatteryCharging, x: 310, y: 30, a: ALERTS[3]! },
           ].map(({ I, x, y, a }) => (
             <button key={a.id} onClick={() => setAlertOpen(a)} style={{ left: x, top: y }} className="absolute" aria-label={a.label}>
               <I className={`size-9 transition ${acked.includes(a.id) ? "text-muted" : a.level === "warn" ? "text-warning drop-shadow-[0_0_8px_currentColor]" : "text-muted-foreground"}`} />
