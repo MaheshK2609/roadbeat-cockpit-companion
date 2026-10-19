@@ -154,7 +154,7 @@ export function Dashboard() {
             <div className="absolute left-0 top-0 flex items-center gap-3 rounded-xl border-4 border-foreground bg-background px-3 py-1 text-center">
               <div className="leading-none"><div className="text-[11px] font-bold">SPEED<br />LIMIT</div><div className="font-display text-3xl font-black">90</div></div>
             </div>
-            <div className="absolute left-1/2 top-0 flex -translate-x-1/2 items-center gap-3">
+            <div className="absolute left-1/2 -top-2 flex -translate-x-1/2 items-center gap-3">
               <CornerUpRight className="size-14" />
               <div><div className="text-2xl font-bold">372 m</div><div className="text-sm text-accent">Enter St. Street, take first right</div></div>
             </div>
@@ -274,9 +274,9 @@ export function Dashboard() {
                 ))}
               </div>
             </div>
-            <div className="mt-4 flex gap-4">
-              <div className="relative h-[150px] w-[110px] shrink-0">
-                <Car className="absolute inset-0 m-auto size-20 rotate-0 text-primary" strokeWidth={1} />
+            <div className="mt-3 flex gap-4">
+              <div className="relative h-[96px] w-[110px] shrink-0">
+                <Car className="absolute inset-0 m-auto size-14 text-primary" strokeWidth={1} />
                 {[["left-0 top-2", 33], ["right-0 top-2", 33], ["left-0 bottom-2", 28], ["right-0 bottom-2", 33]].map(([p, psi], i) => (
                   <div key={i} className={`absolute ${p} rounded-md px-1.5 text-sm font-bold tabular-nums ${psi === 28 && !acked.includes("tpms") ? "bg-warning/20 text-warning" : "bg-secondary text-foreground"}`}>{psi}</div>
                 ))}
@@ -288,13 +288,13 @@ export function Dashboard() {
                 <Stat icon={<Timer className="size-4" />} k="Avg" val="16.4 km/l" />
               </div>
             </div>
-            <div className="mt-4 flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-muted-foreground"><span>Diagnostics</span><span>{active.length} active</span></div>
-            <ul className="mt-2 flex-1 space-y-2 overflow-hidden">
+            <div className="mt-3 flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-muted-foreground"><span>Diagnostics</span><span>{active.length} active</span></div>
+            <ul className="mt-2 flex-1 space-y-1.5 overflow-hidden">
               {ALERTS.map((a) => {
                 const done = acked.includes(a.id);
                 return (
                   <li key={a.id}>
-                    <button onClick={() => setAlertOpen(a)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${done ? "bg-secondary/30 opacity-50" : "bg-secondary/70 hover:bg-primary/15"}`}>
+                    <button onClick={() => setAlertOpen(a)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-1 text-left transition ${done ? "bg-secondary/30 opacity-50" : "bg-secondary/70 hover:bg-primary/15"}`}>
                       <a.icon className={`size-5 ${done ? "text-muted-foreground" : alertColor(a.level)}`} />
                       <span className="flex-1 font-medium">{a.label}</span>
                       <span className="text-xs text-muted-foreground">{done ? "Ack" : a.level.toUpperCase()}</span>
@@ -331,7 +331,7 @@ export function Dashboard() {
 }
 
 function Stat({ icon, k, val }: { icon: React.ReactNode; k: string; val: string }) {
-  return <div className="rounded-xl bg-secondary/60 px-3 py-2"><div className="flex items-center gap-1 text-muted-foreground">{icon}{k}</div><div className="font-bold tabular-nums">{val}</div></div>;
+  return <div className="rounded-xl bg-secondary/60 px-3 py-1"><div className="flex items-center gap-1 text-muted-foreground">{icon}{k}</div><div className="font-bold tabular-nums">{val}</div></div>;
 }
 function HoldBtn({ label, onDown, onUp }: { label: string; onDown: () => void; onUp: () => void }) {
   return <button onPointerDown={onDown} onPointerUp={onUp} onPointerLeave={onUp} className="rounded-xl border border-primary/40 bg-primary/10 py-2 text-sm font-bold tracking-wider text-primary active:bg-primary active:text-primary-foreground">{label}</button>;
