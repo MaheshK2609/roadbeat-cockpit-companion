@@ -193,7 +193,7 @@ export function Dashboard() {
         </section>
 
         {/* ================= BOTTOM ROW ================= */}
-        <div className="absolute bottom-6 left-6 right-6 top-[670px] grid grid-cols-[1.25fr_1fr_1fr] gap-6">
+        <div className="absolute bottom-6 left-6 right-6 top-[670px] grid grid-cols-[1.25fr_1fr_1fr] grid-rows-1 gap-6">
           {/* NAV */}
           <section className="hmi-panel relative overflow-hidden p-6">
             <div className="flex items-center justify-between">
@@ -235,7 +235,7 @@ export function Dashboard() {
           </section>
 
           {/* MEDIA */}
-          <section className="hmi-panel flex flex-col p-6">
+          <section className="hmi-panel flex min-h-0 flex-col p-6">
             <div className="flex gap-5">
               <img src={album} alt="Album art" width={150} height={150} className={`size-[150px] rounded-2xl object-cover shadow-[var(--glow)] ${playing ? "" : "opacity-60"}`} />
               <div className="flex min-w-0 flex-1 flex-col justify-center">
@@ -265,7 +265,7 @@ export function Dashboard() {
           </section>
 
           {/* VEHICLE STATUS */}
-          <section className="hmi-panel flex flex-col p-6">
+          <section className="hmi-panel flex min-h-0 flex-col p-6">
             <div className="flex items-center justify-between">
               <h2 className="font-display text-lg font-bold tracking-widest">VEHICLE</h2>
               <div className="flex gap-1 rounded-full bg-secondary p-1">
