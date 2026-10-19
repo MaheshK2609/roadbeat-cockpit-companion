@@ -7,6 +7,9 @@ import {
 } from "lucide-react";
 import { Gauge } from "./Gauge";
 import { useVehicle, type DriveMode } from "./useVehicle";
+import { useSensors } from "./useSensors";
+import { SensorPanel, sensorValue } from "./SensorPanel";
+import { RoadLines } from "./RoadLines";
 import carRear from "@/assets/car-rear.png";
 import album from "@/assets/album.jpg";
 
@@ -46,7 +49,10 @@ const ADAS = ["ADAS", "LANE ASSIST", "TRIP", "ECO SCORE"];
 export function Dashboard() {
   const scale = useScale();
   const now = useClock();
-  const v = useVehicle();
+  const sensors = useSensors();
+  const simulation = sensors.dataMode === "SIMULATION";
+  const v = useVehicle(simulation);
+  const speed = simulation ? v.speed : sensors.reading.speed_kmh;
   const [signal, setSignal] = useState<"L" | "R" | null>("R");
   const [adas, setAdas] = useState(0);
   const [alertOpen, setAlertOpen] = useState<Alert | null>(null);
@@ -63,7 +69,7 @@ export function Dashboard() {
   useEffect(() => {
     if (!playing) return;
     const i = setInterval(() => setPos((p) => {
-      if (p + 1 >= TRACKS[track]!.dur) { setTrack((t) => (t + 1) % TRACKS.length); return 0; }
+      if (p + 1 >= (TRACKS[track]?.dur ?? 0)) { setTrack((t) => (t + 1) % TRACKS.length); return 0; }
       return p + 1;
     }), 1000);
     return () => clearInterval(i);
@@ -71,6 +77,7 @@ export function Dashboard() {
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (!simulation || (e.target instanceof HTMLElement && ["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName))) return;
       if (e.key === "ArrowUp") v.setThrottle("accel");
       if (e.key === "ArrowDown") v.setThrottle("brake");
       if (e.key === "ArrowLeft") setSignal((s) => (s === "L" ? null : "L"));
@@ -79,13 +86,13 @@ export function Dashboard() {
     const up = (e: KeyboardEvent) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") v.setThrottle(null); };
     window.addEventListener("keydown", down); window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [v.setThrottle]);
+  }, [v.setThrottle, simulation]);
 
   const active = ALERTS.filter((a) => !acked.includes(a.id));
-  const t = TRACKS[track]!;
+  const t = TRACKS[track] ?? { title: "", artist: "", dur: 0 };
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
   const time = now ? now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "--:--";
-  const eta = Math.max(1, Math.round((v.trip / Math.max(v.speed, 20)) * 60));
+  const eta = Math.max(1, Math.round((v.trip / Math.max(speed ?? 0, 20)) * 60));
   const power = Math.round((v.rpm / 8) * 180);
   const alertColor = (l: Alert["level"]) => (l === "crit" ? "text-destructive" : l === "warn" ? "text-warning" : "text-muted-foreground");
 
@@ -109,16 +116,15 @@ export function Dashboard() {
 
           {/* warning icon arcs */}
           {[
-            { I: AlertTriangle, x: 90, y: 150, a: ALERTS[0]! }, { I: Droplet, x: 150, y: 95, a: ALERTS[1]! },
-            { I: Wrench, x: 225, y: 55, a: ALERTS[2]! }, { I: BatteryCharging, x: 310, y: 30, a: ALERTS[3]! },
+            ...ALERTS.map((a, i) => ({ I: a.icon, x: [90, 150, 225, 310][i] ?? 90, y: [150, 95, 55, 30][i] ?? 150, a })),
           ].map(({ I, x, y, a }) => (
-            <button key={a.id} onClick={() => setAlertOpen(a)} style={{ left: x, top: y }} className="absolute" aria-label={a.label}>
-              <I className={`size-9 transition ${acked.includes(a.id) ? "text-muted" : a.level === "warn" ? "text-warning drop-shadow-[0_0_8px_currentColor]" : "text-muted-foreground"}`} />
+            <button key={a.id} onClick={() => setAlertOpen(simulation ? a : { ...a, detail: "No hardware data supplied for this diagnostic. The demo alert is not a real vehicle fault.", level: "info" })} style={{ left: x, top: y }} className="absolute" aria-label={a.label}>
+              <I className={`size-9 transition ${!simulation || acked.includes(a.id) ? "text-muted" : a.level === "warn" ? "text-warning drop-shadow-[0_0_8px_currentColor]" : "text-muted-foreground"}`} />
             </button>
           ))}
           {[
             { I: ShieldCheck, x: 310, y: 30, on: true }, { I: Lightbulb, x: 225, y: 55, on: lights, click: () => setLights((l) => !l) },
-            { I: Zap, x: 150, y: 95, on: v.mode === "ECO" }, { I: Thermometer, x: 90, y: 150, on: false },
+            { I: Zap, x: 150, y: 95, on: v.mode === "ECO" }, { I: Thermometer, x: 90, y: 150, on: !simulation && sensors.status === "SENSOR ERROR", click: () => setAlertOpen({ id: "sensor", icon: Thermometer, label: sensors.status, detail: sensors.error || "Sensor data unavailable", level: "warn" }) },
           ].map(({ I, x, y, on, click }, i) => (
             <button key={i} onClick={click} style={{ right: x, top: y }} className="absolute" aria-label="indicator">
               <I className={`size-9 ${on ? "text-primary drop-shadow-[0_0_8px_currentColor]" : "text-muted"}`} />
@@ -126,25 +132,25 @@ export function Dashboard() {
           ))}
 
           {/* temp bar */}
-          <SideBar side="left" value={v.temp} icon={<Thermometer className="size-8" />} />
-          <SideBar side="right" value={v.fuel} icon={<Fuel className="size-8" />} />
+          <SideBar side="left" value={null} icon={<Thermometer className="size-8" />} />
+          <SideBar side="right" value={simulation ? v.fuel : null} icon={<Fuel className="size-8" />} />
 
           {/* gauges */}
           <div className="absolute left-[130px] top-[90px]">
-            <Gauge id="rpm" value={gaugeView === "rpm" ? v.rpm : power / 22.5} max={8} redFrom={6.5} labels={[0, 1, 2, 3, 4, 5, 6, 7, 8]} onClick={() => setGaugeView((g) => (g === "rpm" ? "power" : "rpm"))}
+            <Gauge id="rpm" value={simulation ? gaugeView === "rpm" ? v.rpm : power / 22.5 : null} max={8} redFrom={6.5} labels={[0, 1, 2, 3, 4, 5, 6, 7, 8]} onClick={() => setGaugeView((g) => (g === "rpm" ? "power" : "rpm"))}
               footer={<div className="text-lg font-bold leading-tight tracking-widest text-muted-foreground">{gaugeView === "rpm" ? <>RPM<br />×1000</> : <>POWER<br />kW</>}</div>}>
               <div className="text-sm font-semibold tracking-[0.3em] text-muted-foreground">GEAR</div>
               <div className="flex items-start font-display text-[96px] font-black leading-none glow-text">
-                {v.gear === 0 ? "N" : v.gear}
-                {v.rpm > 3.2 && v.gear < 6 && <span className="ml-1 text-4xl text-success">▲</span>}
+                {!simulation ? "—" : v.gear === 0 ? "N" : v.gear}
+                {simulation && v.rpm > 3.2 && v.gear < 6 && <span className="ml-1 text-4xl text-success">▲</span>}
               </div>
-              <div className="mt-1 font-display text-lg tabular-nums text-accent">{gaugeView === "rpm" ? `${Math.round(v.rpm * 1000)} rpm` : `${power} kW`}</div>
+              <div className="mt-1 font-display text-lg tabular-nums text-accent">{!simulation ? "NO DATA" : gaugeView === "rpm" ? `${Math.round(v.rpm * 1000)} rpm` : `${power} kW`}</div>
             </Gauge>
           </div>
           <div className="absolute right-[130px] top-[90px]">
-            <Gauge id="spd" value={v.speed} max={240} redFrom={180} labels={[0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240]}
+            <Gauge id="spd" value={speed} max={240} redFrom={180} labels={[0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240]}
               footer={<div className="text-lg font-bold tracking-widest text-muted-foreground">{v.mode}</div>}>
-              <div className="font-display text-[110px] font-black leading-none tabular-nums glow-text">{Math.round(v.speed)}</div>
+              <div className="font-display text-[110px] font-black leading-none tabular-nums glow-text">{speed === null ? "—" : Math.round(speed)}</div>
               <div className="text-xl font-bold tracking-[0.3em] text-muted-foreground">KM/H</div>
             </Gauge>
           </div>
@@ -168,18 +174,17 @@ export function Dashboard() {
               <polygon points="295,0 325,0 420,340 200,340" fill="url(#lane)" opacity={0.6} />
               <line x1="270" y1="0" x2="20" y2="340" stroke="var(--color-primary)" strokeWidth="3" />
               <line x1="350" y1="0" x2="600" y2="340" stroke="var(--color-primary)" strokeWidth="3" />
-              <line x1="290" y1="0" x2="180" y2="340" stroke="var(--color-foreground)" strokeOpacity=".5" strokeWidth="2" strokeDasharray="22 18" style={{ strokeDashoffset: -v.odo * 4000, transition: "none" }} />
-              <line x1="330" y1="0" x2="440" y2="340" stroke="var(--color-foreground)" strokeOpacity=".5" strokeWidth="2" strokeDasharray="22 18" style={{ strokeDashoffset: -v.odo * 4000 }} />
+              <RoadLines speed={speed} />
             </svg>
             <img src={carRear} alt="Lead vehicle" width={60} height={60} className="absolute left-[262px] top-[150px] w-[60px] opacity-80" />
             <img src={carRear} alt="Your vehicle" width={210} height={210} className="absolute bottom-6 left-1/2 w-[210px] -translate-x-1/2 drop-shadow-[0_10px_30px_var(--color-primary)]" />
-            <div className="absolute bottom-0 left-6 flex items-center gap-2 text-xl font-bold"><MapPin className="size-6" />{v.trip.toFixed(1)} km</div>
-            <div className="absolute bottom-0 right-6 flex items-center gap-2 text-xl font-bold"><Clock className="size-6" />{eta} min</div>
+            <div className="absolute bottom-0 left-6 flex items-center gap-2 text-xl font-bold"><MapPin className="size-6" />{simulation ? v.trip.toFixed(1) : "—"} km</div>
+            <div className="absolute bottom-0 right-6 flex items-center gap-2 text-xl font-bold"><Clock className="size-6" />{simulation ? eta : "—"} min</div>
           </div>
 
           {/* bottom strip */}
           <div className="absolute bottom-0 left-1/2 flex h-[80px] w-[760px] -translate-x-1/2 items-center justify-between rounded-t-[32px] border-x border-t border-border bg-background/70 px-8">
-            <div><div className="flex items-center gap-1 text-sm font-semibold text-muted-foreground">ODO <GaugeIcon className="size-4" /></div><div className="text-2xl font-bold tabular-nums">{Math.floor(v.odo)} km</div></div>
+            <div><div className="flex items-center gap-1 text-sm font-semibold text-muted-foreground">ODO <GaugeIcon className="size-4" /></div><div className="text-2xl font-bold tabular-nums">{simulation ? Math.floor(v.odo) : "—"} km</div></div>
             <div className="flex items-center gap-5">
               <button onClick={() => setAdas((a) => (a + ADAS.length - 1) % ADAS.length)} aria-label="Previous"><ChevronLeft className="size-7" /></button>
               <span className="w-44 text-center font-display text-xl font-bold tracking-wider">{ADAS[adas]}</span>
@@ -187,7 +192,7 @@ export function Dashboard() {
             </div>
             <div className="text-right">
               <div className={`text-sm font-bold ${v.mode === "ECO" ? "text-success" : v.mode === "SPORT" ? "text-destructive" : "text-accent"}`}>{v.mode}</div>
-              <div className="text-xl font-bold">CRUISE <span className="tabular-nums">{v.cruise}</span><span className="text-sm"> km/h</span></div>
+              <div className="text-xl font-bold">CRUISE <span className="tabular-nums">{simulation ? v.cruise : "—"}</span><span className="text-sm"> km/h</span></div>
             </div>
           </div>
         </section>
@@ -214,7 +219,7 @@ export function Dashboard() {
                   <circle cx="470" cy="60" r="10" fill="var(--color-destructive)" />
                 </svg>
                 <div className="absolute bottom-[28px] left-[150px] flex size-10 items-center justify-center rounded-full bg-primary shadow-[var(--glow)]"><Navigation className="size-5 fill-primary-foreground text-primary-foreground" /></div>
-                <div className="absolute right-4 top-4 rounded-xl bg-card/90 px-4 py-2 text-sm"><div className="font-bold">Tech Park, Gate 2</div><div className="text-muted-foreground">{v.trip.toFixed(1)} km · {eta} min</div></div>
+                <div className="absolute right-4 top-4 rounded-xl bg-card/90 px-4 py-2 text-sm"><div className="font-bold">Tech Park, Gate 2</div><div className="text-muted-foreground">{simulation ? v.trip.toFixed(1) : "—"} km · {simulation ? eta : "—"} min</div></div>
               </div>
             )}
             {navTab === "route" && (
@@ -278,23 +283,23 @@ export function Dashboard() {
               <div className="relative h-[96px] w-[110px] shrink-0">
                 <Car className="absolute inset-0 m-auto size-14 text-primary" strokeWidth={1} />
                 {[["left-0 top-2", 33], ["right-0 top-2", 33], ["left-0 bottom-2", 28], ["right-0 bottom-2", 33]].map(([p, psi], i) => (
-                  <div key={i} className={`absolute ${p} rounded-md px-1.5 text-sm font-bold tabular-nums ${psi === 28 && !acked.includes("tpms") ? "bg-warning/20 text-warning" : "bg-secondary text-foreground"}`}>{psi}</div>
+                  <div key={i} className={`absolute ${p} rounded-md px-1.5 text-sm font-bold tabular-nums ${psi === 28 && !acked.includes("tpms") ? "bg-warning/20 text-warning" : "bg-secondary text-foreground"}`}>{simulation ? psi : "—"}</div>
                 ))}
               </div>
               <div className="grid flex-1 grid-cols-2 gap-2 text-sm">
-                <Stat icon={<Fuel className="size-4" />} k="Range" val={`${Math.round(v.fuel * 640)} km`} />
-                <Stat icon={<Thermometer className="size-4" />} k="Coolant" val="88°C" />
-                <Stat icon={<BatteryCharging className="size-4" />} k="Battery" val="12.1 V" />
-                <Stat icon={<Timer className="size-4" />} k="Avg" val="16.4 km/l" />
+                <Stat icon={<Fuel className="size-4" />} k="Range" val={simulation ? `${Math.round(v.fuel * 640)} km` : "—"} />
+                <Stat icon={<Thermometer className="size-4" />} k="Coolant" val={sensorValue(sensors.reading.coolant_temperature_c, "°C")} />
+                <Stat icon={<BatteryCharging className="size-4" />} k="Oil pressure" val={sensorValue(sensors.reading.oil_pressure, sensors.reading.oil_pressure_unit)} />
+                <Stat icon={<Timer className="size-4" />} k="Avg" val={simulation ? "16.4 km/l" : "—"} />
               </div>
             </div>
-            <div className="mt-3 flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-muted-foreground"><span>Diagnostics</span><span>{active.length} active</span></div>
+            <div className="mt-3 flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-muted-foreground"><span>{simulation ? "Demo diagnostics" : "Diagnostics"}</span><span>{simulation ? `${active.length} active` : sensors.status}</span></div>
             <ul className="mt-2 flex-1 space-y-1.5 overflow-y-auto">
               {ALERTS.map((a) => {
                 const done = acked.includes(a.id);
                 return (
                   <li key={a.id}>
-                    <button onClick={() => setAlertOpen(a)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-1 text-left transition ${done ? "bg-secondary/30 opacity-50" : "bg-secondary/70 hover:bg-primary/15"}`}>
+                    <button onClick={() => setAlertOpen(simulation ? a : { ...a, detail: "No hardware data supplied for this diagnostic. The demo alert is not a real vehicle fault.", level: "info" })} className={`flex w-full items-center gap-3 rounded-xl px-3 py-1 text-left transition ${done ? "bg-secondary/30 opacity-50" : "bg-secondary/70 hover:bg-primary/15"}`}>
                       <a.icon className={`size-5 ${done ? "text-muted-foreground" : alertColor(a.level)}`} />
                       <span className="flex-1 font-medium">{a.label}</span>
                       <span className="text-xs text-muted-foreground">{done ? "Ack" : a.level.toUpperCase()}</span>
@@ -304,12 +309,14 @@ export function Dashboard() {
               })}
             </ul>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <HoldBtn label="Accelerate ▲" onDown={() => v.setThrottle("accel")} onUp={() => v.setThrottle(null)} />
-              <HoldBtn label="Brake ▼" onDown={() => v.setThrottle("brake")} onUp={() => v.setThrottle(null)} />
+              <HoldBtn disabled={!simulation} label="Accelerate ▲" onDown={() => v.setThrottle("accel")} onUp={() => v.setThrottle(null)} />
+              <HoldBtn disabled={!simulation} label="Brake ▼" onDown={() => v.setThrottle("brake")} onUp={() => v.setThrottle(null)} />
             </div>
           </section>
         </div>
 
+        <SensorPanel sensors={sensors} simulationSpeed={v.speed} setSimulationSpeed={v.setSimulationSpeed} />
+        <div className="absolute left-12 top-[620px] text-xs text-muted-foreground">{simulation ? "DEMO VEHICLE DATA · SENSOR PLACEHOLDERS" : `HARDWARE · ${speed === null ? "SPEED: NO DATA" : "LIVE SPEED"}`} · LAST UPDATE {sensors.lastUpdate ? new Date(sensors.lastUpdate).toLocaleTimeString() : "—"}</div>
         {alertOpen && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm" onClick={() => setAlertOpen(null)}>
             <div className="hmi-panel w-[520px] p-8" onClick={(e) => e.stopPropagation()}>
@@ -333,18 +340,18 @@ export function Dashboard() {
 function Stat({ icon, k, val }: { icon: React.ReactNode; k: string; val: string }) {
   return <div className="rounded-xl bg-secondary/60 px-3 py-1"><div className="flex items-center gap-1 text-muted-foreground">{icon}{k}</div><div className="font-bold tabular-nums">{val}</div></div>;
 }
-function HoldBtn({ label, onDown, onUp }: { label: string; onDown: () => void; onUp: () => void }) {
-  return <button onPointerDown={onDown} onPointerUp={onUp} onPointerLeave={onUp} className="rounded-xl border border-primary/40 bg-primary/10 py-2 text-sm font-bold tracking-wider text-primary active:bg-primary active:text-primary-foreground">{label}</button>;
+function HoldBtn({ label, onDown, onUp, disabled }: { label: string; onDown: () => void; onUp: () => void; disabled?: boolean }) {
+  return <button disabled={disabled} onPointerDown={onDown} onPointerUp={onUp} onPointerLeave={onUp} className="rounded-xl border border-primary/40 bg-primary/10 py-2 text-sm font-bold tracking-wider text-primary active:bg-primary active:text-primary-foreground">{label}</button>;
 }
-function SideBar({ side, value, icon }: { side: "left" | "right"; value: number; icon: React.ReactNode }) {
+function SideBar({ side, value, icon }: { side: "left" | "right"; value: number | null; icon: React.ReactNode }) {
   const left = side === "left";
   return (
     <div className={`absolute top-[230px] flex flex-col items-center gap-3 ${left ? "left-[52px]" : "right-[52px]"}`}>
       {icon}
       <div className="relative h-[300px] w-5 overflow-hidden rounded-full bg-secondary">
-        <div className="absolute bottom-0 w-full rounded-full transition-all" style={{ height: `${value * 100}%`, background: left ? "linear-gradient(to top, var(--color-primary), var(--color-warning), var(--color-destructive))" : "linear-gradient(to top, var(--color-destructive), var(--color-primary), var(--color-accent))", boxShadow: "var(--glow)" }} />
+        <div className="absolute bottom-0 w-full rounded-full transition-all" style={{ height: `${(value ?? 0) * 100}%`, background: left ? "linear-gradient(to top, var(--color-primary), var(--color-warning), var(--color-destructive))" : "linear-gradient(to top, var(--color-destructive), var(--color-primary), var(--color-accent))", boxShadow: "var(--glow)" }} />
       </div>
-      <span className="text-sm font-bold tabular-nums text-muted-foreground">{Math.round(value * 100)}%</span>
+      <span className="text-sm font-bold tabular-nums text-muted-foreground">{value === null ? "—" : `${Math.round(value * 100)}%`}</span>
     </div>
   );
 }

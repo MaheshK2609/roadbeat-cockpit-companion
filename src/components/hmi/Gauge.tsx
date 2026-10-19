@@ -14,7 +14,7 @@ function arc(cx: number, cy: number, r: number, from: number, to: number) {
 }
 
 interface Props {
-  value: number;
+  value: number | null;
   max: number;
   labels: number[];
   redFrom: number;
@@ -27,7 +27,7 @@ interface Props {
 export function Gauge({ value, max, labels, redFrom, id, children, footer, onClick }: Props) {
   const size = 500;
   const c = size / 2;
-  const v = Math.max(0, Math.min(max, value));
+  const v = Math.max(0, Math.min(max, value ?? 0));
   const ang = START + (v / max) * SWEEP;
   const minor = 40;
   return (
@@ -81,7 +81,7 @@ export function Gauge({ value, max, labels, redFrom, id, children, footer, onCli
         <circle cx={c} cy={c} r={135} fill="var(--color-background)" stroke="var(--color-border)" strokeWidth={2} />
         <circle cx={c} cy={c} r={128} fill="none" stroke="var(--color-primary)" strokeOpacity={0.25} strokeWidth={8} filter={`url(#${id}-glow)`} />
         {/* needle */}
-        <g style={{ transform: `rotate(${ang}deg)`, transformOrigin: `${c}px ${c}px`, transition: "transform 120ms linear" }}>
+        <g opacity={value === null ? 0 : 1} style={{ transform: `rotate(${ang}deg)`, transformOrigin: `${c}px ${c}px`, transition: "transform 120ms linear" }}>
           <line x1={c + 140} y1={c} x2={c + 222} y2={c} stroke="var(--color-foreground)" strokeWidth={4} strokeLinecap="round" filter={`url(#${id}-glow)`} />
         </g>
         <ellipse cx={c} cy={c + 95} rx={70} ry={18} fill="var(--color-primary)" opacity={0.35} filter={`url(#${id}-glow)`} />
