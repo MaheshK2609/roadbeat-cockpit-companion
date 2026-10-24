@@ -1,19 +1,18 @@
 import { useEffect, useState } from "react";
 import {
-  AlertTriangle, ArrowBigLeft, ArrowBigRight, BatteryCharging, Car, ChevronLeft, ChevronRight,
-  Cloud, CornerUpRight, Droplet, Fuel, Gauge as GaugeIcon, Heart, Lightbulb, MapPin, Navigation,
-  Pause, Play, Repeat, Search, Shuffle, SkipBack, SkipForward, Thermometer, Timer, Volume2,
-  Wrench, Zap, Clock, Home, Briefcase, Coffee, ShieldCheck, Settings2, X,
+  AlertTriangle, Car, LineChart, Music, Navigation, Settings, Smartphone, Thermometer, Trophy, Wrench,
 } from "lucide-react";
-import { Gauge } from "./Gauge";
-import { useVehicle, type DriveMode } from "./useVehicle";
-import { useSensors } from "./useSensors";
-import { SensorPanel, sensorValue } from "./SensorPanel";
-import { RoadLines } from "./RoadLines";
-import carRear from "@/assets/car-rear.png";
-import album from "@/assets/album.jpg";
+import { ClusterGauge } from "./ClusterGauge";
+import { SportsCar } from "./SportsCar";
+import { ChartsView } from "./ChartsView";
+import { FaultsView } from "./FaultsView";
+import { SettingsView } from "./SettingsView";
+import { useTelemetry, type TelemetryStatus } from "./useTelemetry";
+import { convertSpeed, formatDuration, resolveApiBase } from "@/lib/telemetry";
 
 const W = 1920, H = 1080;
+type View = "cluster" | "charts" | "faults" | "settings";
+type Unit = "kmh" | "mph";
 
 function useScale() {
   const [s, setS] = useState(1);
@@ -30,328 +29,260 @@ function useClock() {
   return d;
 }
 
-type Alert = { id: string; icon: typeof Droplet; label: string; detail: string; level: "warn" | "crit" | "info" };
-const ALERTS: Alert[] = [
-  { id: "tpms", icon: AlertTriangle, label: "Tire Pressure", detail: "Rear-left tire at 28 PSI (rec. 33). Check at next stop.", level: "warn" },
-  { id: "oil", icon: Droplet, label: "Oil Service", detail: "Oil change due in 450 km.", level: "info" },
-  { id: "engine", icon: Wrench, label: "Engine Check", detail: "No faults detected. Last scan 2 min ago.", level: "info" },
-  { id: "battery", icon: BatteryCharging, label: "12V Battery", detail: "Voltage 12.1V — slightly low.", level: "warn" },
-];
+const STATUS_META: Record<TelemetryStatus, { label: string; className: string }> = {
+  LIVE: { label: "LIVE TELEMETRY", className: "text-success" },
+  STALE: { label: "STALE DATA", className: "text-warning" },
+  CONNECTING: { label: "CONNECTING", className: "text-warning" },
+  OFFLINE: { label: "OFFLINE — NO BACKEND", className: "text-destructive" },
+  DEMO: { label: "DEMO MODE — NOT REAL DATA", className: "text-warning" },
+};
 
-const TRACKS = [
-  { title: "Midnight Boulevard", artist: "Neon Drive", dur: 214 },
-  { title: "Brooklyn Bridge To Chorus", artist: "The Strokes", dur: 238 },
-  { title: "Nightcall", artist: "Kavinsky", dur: 258 },
-];
+const RAIL = [
+  ["cluster", Car, "Cockpit"],
+  ["charts", LineChart, "Telemetry charts"],
+  ["faults", Wrench, "Faults"],
+  ["settings", Settings, "Settings"],
+] as const;
 
-const ADAS = ["ADAS", "LANE ASSIST", "TRIP", "ECO SCORE"];
-
-export function Dashboard() {
-  const scale = useScale();
-  const now = useClock();
-  const sensors = useSensors();
-  const simulation = sensors.dataMode === "SIMULATION";
-  const v = useVehicle(simulation);
-  const speed = simulation ? v.speed : sensors.reading.speed_kmh;
-  const [signal, setSignal] = useState<"L" | "R" | null>("R");
-  const [adas, setAdas] = useState(0);
-  const [alertOpen, setAlertOpen] = useState<Alert | null>(null);
-  const [acked, setAcked] = useState<string[]>([]);
-  const [navTab, setNavTab] = useState<"map" | "route" | "places">("map");
-  const [playing, setPlaying] = useState(true);
-  const [track, setTrack] = useState(0);
-  const [pos, setPos] = useState(72);
-  const [vol, setVol] = useState(0.6);
-  const [liked, setLiked] = useState(false);
-  const [lights, setLights] = useState(true);
-  const [gaugeView, setGaugeView] = useState<"rpm" | "power">("rpm");
-
-  useEffect(() => {
-    if (!playing) return;
-    const i = setInterval(() => setPos((p) => {
-      if (p + 1 >= (TRACKS[track]?.dur ?? 0)) { setTrack((t) => (t + 1) % TRACKS.length); return 0; }
-      return p + 1;
-    }), 1000);
-    return () => clearInterval(i);
-  }, [playing, track]);
-
-  useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (!simulation || (e.target instanceof HTMLElement && ["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName))) return;
-      if (e.key === "ArrowUp") v.setThrottle("accel");
-      if (e.key === "ArrowDown") v.setThrottle("brake");
-      if (e.key === "ArrowLeft") setSignal((s) => (s === "L" ? null : "L"));
-      if (e.key === "ArrowRight") setSignal((s) => (s === "R" ? null : "R"));
-    };
-    const up = (e: KeyboardEvent) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") v.setThrottle(null); };
-    window.addEventListener("keydown", down); window.addEventListener("keyup", up);
-    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [v.setThrottle, simulation]);
-
-  const active = ALERTS.filter((a) => !acked.includes(a.id));
-  const t = TRACKS[track] ?? { title: "", artist: "", dur: 0 };
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-  const time = now ? now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "--:--";
-  const eta = Math.max(1, Math.round((v.trip / Math.max(speed ?? 0, 20)) * 60));
-  const power = Math.round((v.rpm / 8) * 180);
-  const alertColor = (l: Alert["level"]) => (l === "crit" ? "text-destructive" : l === "warn" ? "text-warning" : "text-muted-foreground");
-
+function Readout({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
-    <div className="hmi-bg fixed inset-0 overflow-hidden font-sans text-foreground select-none">
-      <div className="absolute left-1/2 top-1/2" style={{ width: W, height: H, transform: `translate(-50%,-50%) scale(${scale})` }}>
-        {/* ================= CLUSTER ================= */}
-        <section className="hmi-panel absolute left-6 right-6 top-6 h-[620px] overflow-hidden rounded-[56px]">
-          {/* top capsule */}
-          <div className="absolute left-1/2 top-0 flex h-[84px] w-[620px] -translate-x-1/2 items-center justify-between rounded-b-[40px] border-x border-b border-border bg-background/70 px-10 shadow-[var(--glow)]">
-            <div className="flex items-center gap-3 text-2xl font-semibold"><Cloud className="size-8" /> 29°C</div>
-            <div className="font-display text-2xl font-black tracking-[0.3em] text-primary glow-text">AURA</div>
-            <div className="text-2xl font-semibold tabular-nums">{time}</div>
-          </div>
-          <button onClick={() => setSignal((s) => (s === "L" ? null : "L"))} className="absolute left-[560px] top-6" aria-label="Left signal">
-            <ArrowBigLeft className={`size-11 ${signal === "L" ? "blink fill-success text-success" : "fill-muted text-muted"}`} />
-          </button>
-          <button onClick={() => setSignal((s) => (s === "R" ? null : "R"))} className="absolute right-[560px] top-6" aria-label="Right signal">
-            <ArrowBigRight className={`size-11 ${signal === "R" ? "blink fill-success text-success" : "fill-muted text-muted"}`} />
-          </button>
-
-          {/* warning icon arcs */}
-          {[
-            ...ALERTS.map((a, i) => ({ I: a.icon, x: [90, 150, 225, 310][i] ?? 90, y: [150, 95, 55, 30][i] ?? 150, a })),
-          ].map(({ I, x, y, a }) => (
-            <button key={a.id} onClick={() => setAlertOpen(simulation ? a : { ...a, detail: "No hardware data supplied for this diagnostic. The demo alert is not a real vehicle fault.", level: "info" })} style={{ left: x, top: y }} className="absolute" aria-label={a.label}>
-              <I className={`size-9 transition ${!simulation || acked.includes(a.id) ? "text-muted" : a.level === "warn" ? "text-warning drop-shadow-[0_0_8px_currentColor]" : "text-muted-foreground"}`} />
-            </button>
-          ))}
-          {[
-            { I: ShieldCheck, x: 310, y: 30, on: true }, { I: Lightbulb, x: 225, y: 55, on: lights, click: () => setLights((l) => !l) },
-            { I: Zap, x: 150, y: 95, on: v.mode === "ECO" }, { I: Thermometer, x: 90, y: 150, on: !simulation && sensors.status === "SENSOR ERROR", click: () => setAlertOpen({ id: "sensor", icon: Thermometer, label: sensors.status, detail: sensors.error || "Sensor data unavailable", level: "warn" }) },
-          ].map(({ I, x, y, on, click }, i) => (
-            <button key={i} onClick={click} style={{ right: x, top: y }} className="absolute" aria-label="indicator">
-              <I className={`size-9 ${on ? "text-primary drop-shadow-[0_0_8px_currentColor]" : "text-muted"}`} />
-            </button>
-          ))}
-
-          {/* temp bar */}
-          <SideBar side="left" value={null} icon={<Thermometer className="size-8" />} />
-          <SideBar side="right" value={simulation ? v.fuel : null} icon={<Fuel className="size-8" />} />
-
-          {/* gauges */}
-          <div className="absolute left-[130px] top-[90px]">
-            <Gauge id="rpm" value={simulation ? gaugeView === "rpm" ? v.rpm : power / 22.5 : null} max={8} redFrom={6.5} labels={[0, 1, 2, 3, 4, 5, 6, 7, 8]} onClick={() => setGaugeView((g) => (g === "rpm" ? "power" : "rpm"))}
-              footer={<div className="text-lg font-bold leading-tight tracking-widest text-muted-foreground">{gaugeView === "rpm" ? <>RPM<br />×1000</> : <>POWER<br />kW</>}</div>}>
-              <div className="text-sm font-semibold tracking-[0.3em] text-muted-foreground">GEAR</div>
-              <div className="flex items-start font-display text-[96px] font-black leading-none glow-text">
-                {!simulation ? "—" : v.gear === 0 ? "N" : v.gear}
-                {simulation && v.rpm > 3.2 && v.gear < 6 && <span className="ml-1 text-4xl text-success">▲</span>}
-              </div>
-              <div className="mt-1 font-display text-lg tabular-nums text-accent">{!simulation ? "NO DATA" : gaugeView === "rpm" ? `${Math.round(v.rpm * 1000)} rpm` : `${power} kW`}</div>
-            </Gauge>
-          </div>
-          <div className="absolute right-[130px] top-[90px]">
-            <Gauge id="spd" value={speed} max={240} redFrom={180} labels={[0, 20, 40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240]}
-              footer={<div className="text-lg font-bold tracking-widest text-muted-foreground">{v.mode}</div>}>
-              <div className="font-display text-[110px] font-black leading-none tabular-nums glow-text">{speed === null ? "—" : Math.round(speed)}</div>
-              <div className="text-xl font-bold tracking-[0.3em] text-muted-foreground">KM/H</div>
-            </Gauge>
-          </div>
-
-          {/* road */}
-          <div className="absolute left-1/2 top-[110px] h-[420px] w-[620px] -translate-x-1/2">
-            <div className="absolute left-0 top-0 flex items-center gap-3 rounded-xl border-4 border-foreground bg-background px-3 py-1 text-center">
-              <div className="leading-none"><div className="text-[11px] font-bold">SPEED<br />LIMIT</div><div className="font-display text-3xl font-black">90</div></div>
-            </div>
-            <div className="absolute left-1/2 -top-2 flex -translate-x-1/2 items-center gap-3">
-              <CornerUpRight className="size-14" />
-              <div><div className="text-2xl font-bold">372 m</div><div className="text-sm text-accent">Enter St. Street, take first right</div></div>
-            </div>
-            <div className="absolute right-4 top-2 rounded-full border-2 border-primary/50 p-2"><Settings2 className="size-8 text-primary" /></div>
-            <svg viewBox="0 0 620 340" className="absolute bottom-10 left-0 h-[340px] w-full">
-              <defs>
-                <linearGradient id="lane" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0" /><stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0.9" /></linearGradient>
-                <linearGradient id="road" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--color-primary)" stopOpacity="0" /><stop offset="100%" stopColor="var(--color-primary)" stopOpacity="0.25" /></linearGradient>
-              </defs>
-              <polygon points="270,0 350,0 600,340 20,340" fill="url(#road)" />
-              <polygon points="295,0 325,0 420,340 200,340" fill="url(#lane)" opacity={0.6} />
-              <line x1="270" y1="0" x2="20" y2="340" stroke="var(--color-primary)" strokeWidth="3" />
-              <line x1="350" y1="0" x2="600" y2="340" stroke="var(--color-primary)" strokeWidth="3" />
-              <RoadLines speed={speed} />
-            </svg>
-            <img src={carRear} alt="Lead vehicle" width={60} height={60} className="absolute left-[262px] top-[150px] w-[60px] opacity-80" />
-            <img src={carRear} alt="Your vehicle" width={210} height={210} className="absolute bottom-6 left-1/2 w-[210px] -translate-x-1/2 drop-shadow-[0_10px_30px_var(--color-primary)]" />
-            <div className="absolute bottom-0 left-6 flex items-center gap-2 text-xl font-bold"><MapPin className="size-6" />{simulation ? v.trip.toFixed(1) : "—"} km</div>
-            <div className="absolute bottom-0 right-6 flex items-center gap-2 text-xl font-bold"><Clock className="size-6" />{simulation ? eta : "—"} min</div>
-          </div>
-
-          {/* bottom strip */}
-          <div className="absolute bottom-0 left-1/2 flex h-[80px] w-[760px] -translate-x-1/2 items-center justify-between rounded-t-[32px] border-x border-t border-border bg-background/70 px-8">
-            <div><div className="flex items-center gap-1 text-sm font-semibold text-muted-foreground">ODO <GaugeIcon className="size-4" /></div><div className="text-2xl font-bold tabular-nums">{simulation ? Math.floor(v.odo) : "—"} km</div></div>
-            <div className="flex items-center gap-5">
-              <button onClick={() => setAdas((a) => (a + ADAS.length - 1) % ADAS.length)} aria-label="Previous"><ChevronLeft className="size-7" /></button>
-              <span className="w-44 text-center font-display text-xl font-bold tracking-wider">{ADAS[adas]}</span>
-              <button onClick={() => setAdas((a) => (a + 1) % ADAS.length)} aria-label="Next"><ChevronRight className="size-7" /></button>
-            </div>
-            <div className="text-right">
-              <div className={`text-sm font-bold ${v.mode === "ECO" ? "text-success" : v.mode === "SPORT" ? "text-destructive" : "text-accent"}`}>{v.mode}</div>
-              <div className="text-xl font-bold">CRUISE <span className="tabular-nums">{simulation ? v.cruise : "—"}</span><span className="text-sm"> km/h</span></div>
-            </div>
-          </div>
-        </section>
-
-        {/* ================= BOTTOM ROW ================= */}
-        <div className="absolute bottom-6 left-6 right-6 top-[670px] grid grid-cols-[1.25fr_1fr_1fr] grid-rows-1 gap-6">
-          {/* NAV */}
-          <section className="hmi-panel relative overflow-hidden p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex gap-2">
-                {(["map", "route", "places"] as const).map((k) => (
-                  <button key={k} onClick={() => setNavTab(k)} className={`rounded-full px-5 py-2 text-sm font-semibold uppercase tracking-widest transition ${navTab === k ? "bg-primary text-primary-foreground shadow-[var(--glow)]" : "bg-secondary text-muted-foreground"}`}>{k}</button>
-                ))}
-              </div>
-              <div className="flex items-center gap-2 rounded-full bg-secondary px-4 py-2 text-sm text-muted-foreground"><Search className="size-4" />Search destination</div>
-            </div>
-            {navTab === "map" && (
-              <div className="relative mt-4 h-[270px] overflow-hidden rounded-2xl border border-border bg-background">
-                <svg viewBox="0 0 700 270" className="absolute inset-0 h-full w-full">
-                  {Array.from({ length: 14 }).map((_, i) => <line key={`v${i}`} x1={i * 55} y1={0} x2={i * 55 - 60} y2={270} stroke="var(--color-border)" />)}
-                  {Array.from({ length: 6 }).map((_, i) => <line key={`h${i}`} x1={0} y1={i * 50} x2={700} y2={i * 50 + 20} stroke="var(--color-border)" />)}
-                  <path d="M0 200 C 150 180, 250 240, 380 150 S 600 60, 700 90" stroke="var(--color-secondary)" strokeWidth="18" fill="none" />
-                  <path d="M120 270 L 230 160 L 380 150 L 470 60" stroke="var(--color-primary)" strokeWidth="7" fill="none" strokeLinecap="round" style={{ filter: "drop-shadow(0 0 8px var(--color-primary))" }} />
-                  <circle cx="470" cy="60" r="10" fill="var(--color-destructive)" />
-                </svg>
-                <div className="absolute bottom-[28px] left-[150px] flex size-10 items-center justify-center rounded-full bg-primary shadow-[var(--glow)]"><Navigation className="size-5 fill-primary-foreground text-primary-foreground" /></div>
-                <div className="absolute right-4 top-4 rounded-xl bg-card/90 px-4 py-2 text-sm"><div className="font-bold">Tech Park, Gate 2</div><div className="text-muted-foreground">{simulation ? v.trip.toFixed(1) : "—"} km · {simulation ? eta : "—"} min</div></div>
-              </div>
-            )}
-            {navTab === "route" && (
-              <ul className="mt-4 space-y-3">
-                {[["Turn right onto St. Street", "372 m"], ["Continue on Ring Rd", "2.1 km"], ["Keep left at fork", "1.2 km"], ["Arrive at Tech Park, Gate 2", "0.4 km"]].map(([a, b], i) => (
-                  <li key={a} className={`flex items-center justify-between rounded-xl px-4 py-3 ${i === 0 ? "bg-primary/20 text-foreground" : "bg-secondary/60 text-muted-foreground"}`}><span className="flex items-center gap-3"><CornerUpRight className="size-5" />{a}</span><span className="font-semibold">{b}</span></li>
-                ))}
-              </ul>
-            )}
-            {navTab === "places" && (
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                {[[Home, "Home", "12 min"], [Briefcase, "Work", "22 min"], [Coffee, "Blue Tokai Café", "6 min"], [Zap, "EV Charger", "4 min"]].map(([I, n, d]) => {
-                  const Icon = I as typeof Home;
-                  return <button key={n as string} onClick={() => setNavTab("map")} className="flex items-center gap-3 rounded-2xl bg-secondary/60 p-4 text-left transition hover:bg-primary/20"><Icon className="size-7 text-primary" /><div><div className="font-semibold">{n as string}</div><div className="text-sm text-muted-foreground">{d as string}</div></div></button>;
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* MEDIA */}
-          <section className="hmi-panel flex min-h-0 flex-col p-6">
-            <div className="flex gap-5">
-              <img src={album} alt="Album art" width={150} height={150} className={`size-[150px] rounded-2xl object-cover shadow-[var(--glow)] ${playing ? "" : "opacity-60"}`} />
-              <div className="flex min-w-0 flex-1 flex-col justify-center">
-                <div className="text-xs font-semibold uppercase tracking-[0.3em] text-primary">Now playing · Bluetooth</div>
-                <div className="mt-2 truncate text-2xl font-bold">{t.title}</div>
-                <div className="text-lg text-muted-foreground">{t.artist}</div>
-                <div className="mt-3 flex items-end gap-1 h-6">
-                  {Array.from({ length: 18 }).map((_, i) => <span key={i} className="w-1.5 rounded-full bg-primary transition-all" style={{ height: playing ? `${20 + ((Math.sin(pos * 3 + i) + 1) * 40)}%` : "15%" }} />)}
-                </div>
-              </div>
-              <button onClick={() => setLiked((l) => !l)} aria-label="Like" className="self-start"><Heart className={`size-6 ${liked ? "fill-destructive text-destructive" : "text-muted-foreground"}`} /></button>
-            </div>
-            <div className="mt-5">
-              <input type="range" min={0} max={t.dur} value={pos} onChange={(e) => setPos(+e.target.value)} className="w-full accent-[var(--color-primary)]" aria-label="Seek" />
-              <div className="flex justify-between text-sm tabular-nums text-muted-foreground"><span>{fmt(pos)}</span><span>{fmt(t.dur)}</span></div>
-            </div>
-            <div className="mt-2 flex items-center justify-between">
-              <Shuffle className="size-6 text-muted-foreground" />
-              <button onClick={() => { setTrack((x) => (x + TRACKS.length - 1) % TRACKS.length); setPos(0); }} aria-label="Previous track"><SkipBack className="size-8 fill-foreground" /></button>
-              <button onClick={() => setPlaying((p) => !p)} aria-label="Play/Pause" className="flex size-[72px] items-center justify-center rounded-full border-2 border-foreground shadow-[var(--glow)] transition active:scale-95">
-                {playing ? <Pause className="size-8 fill-foreground" /> : <Play className="ml-1 size-8 fill-foreground" />}
-              </button>
-              <button onClick={() => { setTrack((x) => (x + 1) % TRACKS.length); setPos(0); }} aria-label="Next track"><SkipForward className="size-8 fill-foreground" /></button>
-              <Repeat className="size-6 text-muted-foreground" />
-            </div>
-            <div className="mt-auto flex items-center gap-3"><Volume2 className="size-5 text-muted-foreground" /><input type="range" min={0} max={1} step={0.01} value={vol} onChange={(e) => setVol(+e.target.value)} className="flex-1 accent-[var(--color-primary)]" aria-label="Volume" /><span className="w-10 text-right text-sm tabular-nums">{Math.round(vol * 100)}</span></div>
-          </section>
-
-          {/* VEHICLE STATUS */}
-          <section className="hmi-panel flex min-h-0 flex-col p-6">
-            <div className="flex items-center justify-between">
-              <h2 className="font-display text-lg font-bold tracking-widest">VEHICLE</h2>
-              <div className="flex gap-1 rounded-full bg-secondary p-1">
-                {(["ECO", "COMFORT", "SPORT"] as DriveMode[]).map((m) => (
-                  <button key={m} onClick={() => v.setMode(m)} className={`rounded-full px-3 py-1 text-xs font-bold tracking-wider transition ${v.mode === m ? "bg-primary text-primary-foreground shadow-[var(--glow)]" : "text-muted-foreground"}`}>{m}</button>
-                ))}
-              </div>
-            </div>
-            <div className="mt-3 flex gap-4">
-              <div className="relative h-[96px] w-[110px] shrink-0">
-                <Car className="absolute inset-0 m-auto size-14 text-primary" strokeWidth={1} />
-                {[["left-0 top-2", 33], ["right-0 top-2", 33], ["left-0 bottom-2", 28], ["right-0 bottom-2", 33]].map(([p, psi], i) => (
-                  <div key={i} className={`absolute ${p} rounded-md px-1.5 text-sm font-bold tabular-nums ${psi === 28 && !acked.includes("tpms") ? "bg-warning/20 text-warning" : "bg-secondary text-foreground"}`}>{simulation ? psi : "—"}</div>
-                ))}
-              </div>
-              <div className="grid flex-1 grid-cols-2 gap-2 text-sm">
-                <Stat icon={<Fuel className="size-4" />} k="Range" val={simulation ? `${Math.round(v.fuel * 640)} km` : "—"} />
-                <Stat icon={<Thermometer className="size-4" />} k="Coolant" val={sensorValue(sensors.reading.coolant_temperature_c, "°C")} />
-                <Stat icon={<BatteryCharging className="size-4" />} k="Oil pressure" val={sensorValue(sensors.reading.oil_pressure, sensors.reading.oil_pressure_unit)} />
-                <Stat icon={<Timer className="size-4" />} k="Avg" val={simulation ? "16.4 km/l" : "—"} />
-              </div>
-            </div>
-            <div className="mt-3 flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-muted-foreground"><span>{simulation ? "Demo diagnostics" : "Diagnostics"}</span><span>{simulation ? `${active.length} active` : sensors.status}</span></div>
-            <ul className="mt-2 flex-1 space-y-1.5 overflow-y-auto">
-              {ALERTS.map((a) => {
-                const done = acked.includes(a.id);
-                return (
-                  <li key={a.id}>
-                    <button onClick={() => setAlertOpen(simulation ? a : { ...a, detail: "No hardware data supplied for this diagnostic. The demo alert is not a real vehicle fault.", level: "info" })} className={`flex w-full items-center gap-3 rounded-xl px-3 py-1 text-left transition ${done ? "bg-secondary/30 opacity-50" : "bg-secondary/70 hover:bg-primary/15"}`}>
-                      <a.icon className={`size-5 ${done ? "text-muted-foreground" : alertColor(a.level)}`} />
-                      <span className="flex-1 font-medium">{a.label}</span>
-                      <span className="text-xs text-muted-foreground">{done ? "Ack" : a.level.toUpperCase()}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <HoldBtn disabled={!simulation} label="Accelerate ▲" onDown={() => v.setThrottle("accel")} onUp={() => v.setThrottle(null)} />
-              <HoldBtn disabled={!simulation} label="Brake ▼" onDown={() => v.setThrottle("brake")} onUp={() => v.setThrottle(null)} />
-            </div>
-          </section>
-        </div>
-
-        <SensorPanel sensors={sensors} simulationSpeed={v.speed} setSimulationSpeed={v.setSimulationSpeed} />
-        <div className="absolute left-12 top-[620px] text-xs text-muted-foreground">{simulation ? "DEMO VEHICLE DATA · SENSOR PLACEHOLDERS" : `HARDWARE · ${speed === null ? "SPEED: NO DATA" : "LIVE SPEED"}`} · LAST UPDATE {sensors.lastUpdate ? new Date(sensors.lastUpdate).toLocaleTimeString() : "—"}</div>
-        {alertOpen && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm" onClick={() => setAlertOpen(null)}>
-            <div className="hmi-panel w-[520px] p-8" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-4"><alertOpen.icon className={`size-12 ${alertColor(alertOpen.level)}`} /><div><div className="text-xs uppercase tracking-[0.3em] text-muted-foreground">{alertOpen.level}</div><div className="text-2xl font-bold">{alertOpen.label}</div></div></div>
-                <button onClick={() => setAlertOpen(null)} aria-label="Close"><X className="size-6" /></button>
-              </div>
-              <p className="mt-4 text-lg text-muted-foreground">{alertOpen.detail}</p>
-              <div className="mt-6 flex justify-end gap-3">
-                <button onClick={() => setAlertOpen(null)} className="rounded-full bg-secondary px-6 py-2 font-semibold">Later</button>
-                <button onClick={() => { setAcked((a) => [...new Set([...a, alertOpen.id])]); setAlertOpen(null); }} className="rounded-full bg-primary px-6 py-2 font-semibold text-primary-foreground shadow-[var(--glow)]">Acknowledge</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+    <div className="rounded-xl border border-border bg-secondary/60 px-4 py-2">
+      <div className="text-[11px] font-bold tracking-[0.25em] text-muted-foreground">{label}</div>
+      <div className="font-display text-xl font-bold tabular-nums">{value}</div>
+      {note && <div className="text-[10px] text-muted-foreground">{note}</div>}
     </div>
   );
 }
 
-function Stat({ icon, k, val }: { icon: React.ReactNode; k: string; val: string }) {
-  return <div className="rounded-xl bg-secondary/60 px-3 py-1"><div className="flex items-center gap-1 text-muted-foreground">{icon}{k}</div><div className="font-bold tabular-nums">{val}</div></div>;
-}
-function HoldBtn({ label, onDown, onUp, disabled }: { label: string; onDown: () => void; onUp: () => void; disabled?: boolean }) {
-  return <button disabled={disabled} onPointerDown={onDown} onPointerUp={onUp} onPointerLeave={onUp} className="rounded-xl border border-primary/40 bg-primary/10 py-2 text-sm font-bold tracking-wider text-primary active:bg-primary active:text-primary-foreground">{label}</button>;
-}
-function SideBar({ side, value, icon }: { side: "left" | "right"; value: number | null; icon: React.ReactNode }) {
-  const left = side === "left";
+function MiniDial({ value, max, label, unit }: { value: number | null; max: number; label: string; unit: string }) {
+  const frac = value === null ? 0 : Math.max(0, Math.min(1, value / max));
+  const R = 44, CIRC = Math.PI * R;
   return (
-    <div className={`absolute top-[230px] flex flex-col items-center gap-3 ${left ? "left-[52px]" : "right-[52px]"}`}>
-      {icon}
-      <div className="relative h-[300px] w-5 overflow-hidden rounded-full bg-secondary">
-        <div className="absolute bottom-0 w-full rounded-full transition-all" style={{ height: `${(value ?? 0) * 100}%`, background: left ? "linear-gradient(to top, var(--color-primary), var(--color-warning), var(--color-destructive))" : "linear-gradient(to top, var(--color-destructive), var(--color-primary), var(--color-accent))", boxShadow: "var(--glow)" }} />
+    <div className="flex flex-col items-center" role="img" aria-label={`${label}: ${value === null ? "unavailable" : `${value.toFixed(1)} ${unit}`}`}>
+      <svg viewBox="0 0 120 78" className="w-32">
+        <path d={`M 14 70 A ${R} ${R} 0 0 1 106 70`} fill="none" stroke="var(--color-accent)" strokeOpacity={0.3} strokeWidth={8} strokeLinecap="round" />
+        {value !== null && (
+          <path d={`M 14 70 A ${R} ${R} 0 0 1 106 70`} fill="none" stroke="var(--color-primary)" strokeWidth={8}
+            strokeLinecap="round" strokeDasharray={`${frac * CIRC} ${CIRC}`} style={{ transition: "stroke-dasharray 200ms linear", filter: "drop-shadow(0 0 6px var(--color-primary))" }} />
+        )}
+        <text x={60} y={62} textAnchor="middle" fontSize={24} fontWeight={800} fontFamily="var(--font-display)" fill="var(--color-foreground)">
+          {value === null ? "--" : value.toFixed(1)}
+        </text>
+        <text x={60} y={76} textAnchor="middle" fontSize={10} fill="var(--color-muted-foreground)">{unit}</text>
+      </svg>
+      <span className="text-[10px] font-bold tracking-[0.25em] text-muted-foreground">{label}</span>
+    </div>
+  );
+}
+
+export function Dashboard() {
+  const scale = useScale();
+  const now = useClock();
+  const [view, setView] = useState<View>("cluster");
+  const [unit, setUnitState] = useState<Unit>("kmh");
+  const [demo, setDemoState] = useState(false);
+  const [baseOverride, setBaseOverride] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const b = localStorage.getItem("roadbeat.apiBase");
+      const u = localStorage.getItem("roadbeat.unit");
+      const d = localStorage.getItem("roadbeat.demo");
+      if (b) setBaseOverride(b);
+      if (u === "mph") setUnitState("mph");
+      if (d === "1") setDemoState(true);
+    } catch { /* storage unavailable */ }
+  }, []);
+
+  const setUnit = (u: Unit) => { setUnitState(u); try { localStorage.setItem("roadbeat.unit", u); } catch { /* ignore */ } };
+  const setDemo = (d: boolean) => { setDemoState(d); try { localStorage.setItem("roadbeat.demo", d ? "1" : "0"); } catch { /* ignore */ } };
+  const setBase = (b: string | null) => {
+    setBaseOverride(b);
+    try { if (b) localStorage.setItem("roadbeat.apiBase", b); else localStorage.removeItem("roadbeat.apiBase"); } catch { /* ignore */ }
+  };
+
+  const apiBase = resolveApiBase(baseOverride);
+  const t = useTelemetry(apiBase, demo);
+  const s = t.snapshot;
+  const statusMeta = STATUS_META[t.status];
+  const speedVal = s.speed === null ? null : convertSpeed(s.speed, unit);
+  const avgVal = s.avgKmh === null ? null : convertSpeed(s.avgKmh, unit);
+  const unitLabel = unit === "kmh" ? "km/h" : "mph";
+  const activeFaults = s.faults.filter((f) => f.active);
+  const time = now ? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--";
+  const date = now ? now.toLocaleDateString([], { weekday: "short", day: "2-digit", month: "short" }) : "--";
+  const sysParts: string[] = [];
+  if (s.count !== null) sysParts.push(`PKT ${s.count}`);
+  if (s.interval !== null) sysParts.push(`${s.interval}s RATE`);
+  if (s.ip) sysParts.push(s.ip);
+  if (s.uptime !== null) sysParts.push(`UP ${formatDuration(s.uptime)}`);
+  const sysText = sysParts.join(" · ");
+
+  const rail = (
+    <nav aria-label="Views" className="flex gap-3 lg:absolute lg:left-8 lg:top-1/2 lg:-translate-y-1/2 lg:flex-col lg:gap-6">
+      {RAIL.map(([v, I, label]) => (
+        <button key={v} onClick={() => setView(v)} aria-label={label} aria-pressed={view === v}
+          className={`rounded-2xl border p-3 transition ${view === v ? "border-primary bg-primary/20 text-primary shadow-[var(--glow)]" : "border-border text-muted-foreground hover:text-foreground"}`}>
+          <I className="size-6 lg:size-7" />
+        </button>
+      ))}
+    </nav>
+  );
+
+  const banner = (
+    <header className="flex w-full items-center justify-between gap-4 lg:absolute lg:left-1/2 lg:top-10 lg:w-[860px] lg:-translate-x-1/2">
+      <div className="flex items-center gap-2 text-lg font-semibold tabular-nums lg:text-xl">
+        <Thermometer className="size-5 text-primary lg:size-6" />ENG {s.temp === null ? "--" : s.temp.toFixed(1)}°C
       </div>
-      <span className="text-sm font-bold tabular-nums text-muted-foreground">{value === null ? "—" : `${Math.round(value * 100)}%`}</span>
+      <div className="rounded-full border border-primary/60 bg-primary/15 px-4 py-2 text-center font-display text-sm font-bold tracking-[0.2em] shadow-[var(--glow)] lg:px-10 lg:py-3 lg:text-xl lg:tracking-[0.25em]">
+        <span className={statusMeta.className}>{statusMeta.label}</span>
+      </div>
+      <div className="text-lg font-semibold tabular-nums lg:text-xl">{time}</div>
+    </header>
+  );
+
+  const viewPanel = view !== "cluster" && (
+    <div className="z-40 lg:absolute lg:inset-x-24 lg:bottom-32 lg:top-36">
+      {view === "charts" && <ChartsView apiBase={apiBase} onClose={() => setView("cluster")} />}
+      {view === "faults" && <FaultsView apiBase={apiBase} onClose={() => setView("cluster")} />}
+      {view === "settings" && (
+        <SettingsView apiBase={apiBase} baseOverride={baseOverride} onBaseChange={setBase}
+          unit={unit} onUnitChange={setUnit} demo={demo} onDemoChange={setDemo}
+          snapshot={s} status={t.status} error={t.error} onClose={() => setView("cluster")} />
+      )}
+    </div>
+  );
+
+  return (
+    <div className="hmi-bg min-h-screen font-sans text-foreground select-none">
+      {/* ============ WIDESCREEN STAGE (scales to 1366x768 / 1920x1080) ============ */}
+      <div className="fixed inset-0 hidden overflow-hidden lg:block">
+        <div className="absolute left-1/2 top-1/2" style={{ width: W, height: H, transform: `translate(-50%,-50%) scale(${scale})` }}>
+          {/* arched cluster silhouette */}
+          <svg viewBox="0 0 1920 260" className="absolute inset-x-0 top-0 h-[260px] w-full" preserveAspectRatio="none" aria-hidden>
+            <path d="M -40 260 Q 960 -140 1960 260" fill="none" stroke="var(--color-accent)" strokeOpacity={0.25} strokeWidth={2} />
+            <path d="M -40 260 Q 960 -100 1960 260" fill="none" stroke="var(--color-border)" strokeWidth={1} />
+          </svg>
+          <svg viewBox="0 0 1920 320" className="absolute inset-x-0 bottom-0 h-[320px] w-full" preserveAspectRatio="none" aria-hidden>
+            <defs>
+              <radialGradient id="crimson-floor" cx="50%" cy="100%" r="80%">
+                <stop offset="0%" stopColor="var(--color-destructive)" stopOpacity={0.5} />
+                <stop offset="100%" stopColor="var(--color-destructive)" stopOpacity={0} />
+              </radialGradient>
+            </defs>
+            <rect x="0" y="0" width="1920" height="320" fill="url(#crimson-floor)" />
+          </svg>
+
+          {banner}
+          {rail}
+
+          {/* right decorative icon rail */}
+          <div aria-hidden className="absolute right-8 top-1/2 flex -translate-y-1/2 flex-col gap-6 text-muted-foreground/40">
+            <Navigation className="size-6" /><Trophy className="size-6" /><Music className="size-6" /><Smartphone className="size-6" />
+          </div>
+
+          {/* central cluster */}
+          <main className="absolute left-1/2 top-[520px] -translate-x-1/2 -translate-y-1/2">
+            <ClusterGauge rpm={s.rpm} speed={speedVal === null ? "--" : String(Math.round(speedVal))} unit={unitLabel} gearLabel="--" />
+          </main>
+
+          {/* left: vehicle health */}
+          <section aria-label="Vehicle health" className="absolute left-[120px] top-[180px] w-[400px]">
+            <h2 className="font-display text-sm font-bold tracking-[0.3em] text-muted-foreground">VEHICLE HEALTH</h2>
+            <div className="mt-4 flex items-center gap-6">
+              <MiniDial value={s.temp} max={120} label="ENG TEMP" unit="°C" />
+              <div className="flex-1 space-y-3">
+                <Readout label="PRESSURE" value={s.press === null ? "--" : s.press.toFixed(1)} note="unit unverified" />
+                <Readout label="DS SENSOR" value={s.ds === null ? "--" : s.ds.toFixed(1)} note="unit unverified" />
+              </div>
+            </div>
+            <div className="mt-6 flex min-h-16 gap-4" aria-label="Active fault indicators">
+              {activeFaults.length === 0
+                ? <span className="self-center text-sm text-muted-foreground">No active faults reported</span>
+                : activeFaults.slice(0, 4).map((f) => (
+                  <button key={f.key} onClick={() => setView("faults")} className="flex flex-col items-center gap-1 text-warning" aria-label={`Fault: ${f.label}`}>
+                    <AlertTriangle className="size-8 drop-shadow-[0_0_8px_currentColor]" />
+                    <span className="max-w-20 truncate text-[10px]">{f.label}</span>
+                  </button>
+                ))}
+            </div>
+          </section>
+          <div className="absolute bottom-[150px] left-[110px] w-[430px]"><SportsCar /></div>
+
+          {/* right: drive session */}
+          <section aria-label="Drive session" className="absolute right-[120px] top-[180px] w-[400px]">
+            <h2 className="text-right font-display text-sm font-bold tracking-[0.3em] text-muted-foreground">DRIVE SESSION</h2>
+            <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+              <Readout label="MODE" value="--" />
+              <Readout label="SESSION" value={s.driveS === null ? "--" : formatDuration(s.driveS)} />
+              <Readout label={`AVG ${unitLabel}`} value={avgVal === null ? "--" : String(Math.round(avgVal))} />
+            </div>
+            <div className="mt-6">
+              <svg viewBox="0 0 400 170" className="w-full" aria-hidden>
+                <path d="M40 130 C40 70 110 40 170 55 C230 70 250 30 310 35 C360 39 370 90 330 115 C290 140 200 120 150 135 C100 150 40 160 40 130 Z"
+                  fill="none" stroke="var(--color-accent)" strokeOpacity={0.5} strokeWidth={3} strokeLinejoin="round" />
+                <circle cx="40" cy="130" r="6" fill="var(--color-primary)" style={{ filter: "drop-shadow(0 0 6px var(--color-primary))" }} />
+              </svg>
+              <div className="text-center text-[10px] font-semibold tracking-[0.35em] text-muted-foreground">TRACK MAP · DECORATIVE</div>
+            </div>
+          </section>
+
+          {/* bottom ribbon */}
+          <footer className="absolute inset-x-28 bottom-8 flex h-[72px] items-center justify-between gap-6 rounded-full border border-border bg-card/70 px-10 backdrop-blur">
+            <div className="flex min-w-0 items-center gap-3 text-sm font-semibold">
+              <AlertTriangle className={`size-5 shrink-0 ${activeFaults.length ? "text-warning" : "text-muted"}`} />
+              <span className="truncate">
+                {activeFaults.length
+                  ? `${activeFaults.length} ACTIVE FAULT${activeFaults.length > 1 ? "S" : ""}: ${activeFaults[0]?.label ?? ""}`
+                  : "NO ACTIVE FAULTS"}
+              </span>
+            </div>
+            <div className="shrink-0 text-center text-sm text-muted-foreground">{date} · {time}</div>
+            <div className="flex shrink-0 items-center gap-6 text-sm font-semibold tabular-nums">
+              <span>ODO -- km</span>
+              <span>TRIP {s.tripKm === null ? "--" : s.tripKm.toFixed(2)} km</span>
+            </div>
+            <div className="min-w-0 truncate text-xs text-muted-foreground">{sysText || "No system info from backend"}</div>
+          </footer>
+
+          {viewPanel}
+        </div>
+      </div>
+
+      {/* ============ NARROW / MOBILE: intentionally stacked ============ */}
+      <div className="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-5 p-4 lg:hidden">
+        {banner}
+        {rail}
+        {view === "cluster" ? (
+          <>
+            <div className="mx-auto w-full max-w-[420px]">
+              <div style={{ transform: `scale(${Math.min(1, 0.66)})`, transformOrigin: "top center" }}>
+                <ClusterGauge rpm={s.rpm} speed={speedVal === null ? "--" : String(Math.round(speedVal))} unit={unitLabel} gearLabel="--" size={640} />
+              </div>
+            </div>
+            <div className="-mt-40 grid grid-cols-3 gap-3">
+              <Readout label="ENG TEMP" value={s.temp === null ? "--" : `${s.temp.toFixed(1)} °C`} />
+              <Readout label="PRESSURE" value={s.press === null ? "--" : s.press.toFixed(1)} />
+              <Readout label="DS SENSOR" value={s.ds === null ? "--" : s.ds.toFixed(1)} />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <Readout label="SESSION" value={s.driveS === null ? "--" : formatDuration(s.driveS)} />
+              <Readout label={`AVG ${unitLabel}`} value={avgVal === null ? "--" : String(Math.round(avgVal))} />
+              <Readout label="TRIP km" value={s.tripKm === null ? "--" : s.tripKm.toFixed(2)} />
+            </div>
+            <SportsCar />
+            <div className="rounded-2xl border border-border bg-card/70 p-4 text-sm">
+              <div className="flex items-center gap-2 font-semibold">
+                <AlertTriangle className={`size-4 ${activeFaults.length ? "text-warning" : "text-muted"}`} />
+                {activeFaults.length ? `${activeFaults.length} active fault(s)` : "No active faults"}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">{date} · {time} · {sysText || "No system info"}</div>
+            </div>
+          </>
+        ) : (
+          <div className="min-h-[70vh]">{viewPanel}</div>
+        )}
+      </div>
     </div>
   );
 }
